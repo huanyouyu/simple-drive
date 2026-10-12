@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>轻盘 · 文件管理</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <header class="header"><a class="brand" href="/">轻盘<span>服务器文件管理</span></a><div id="account" hidden><span id="identity"></span><button id="logout" class="quiet">退出登录</button></div></header>
+  <main>
+    <div id="notice" role="status" aria-live="polite" hidden></div>
+    <section id="login-view" class="login-card" hidden>
+      <div class="eyebrow">YOUR PRIVATE SPACE</div><h1>登录你的文件空间</h1><p class="muted">使用管理员分配的账号访问文件。</p>
+      <form id="login-form"><label>用户名<input name="username" autocomplete="username" maxlength="64" required></label><label>密码<input name="password" type="password" autocomplete="current-password" maxlength="256" required></label><button type="submit" class="primary full">登录</button></form>
+    </section>
+    <section id="files-view" hidden>
+      <div class="section-head"><div><div class="eyebrow">MY FILES</div><h1>我的文件</h1><p class="muted">文件保存在你的专属服务器目录中。</p></div><div class="actions"><button id="new-folder">新建文件夹</button><button id="upload-files" class="primary">上传文件</button><button id="upload-folder" class="primary">上传文件夹</button></div></div>
+      <input id="files-input" type="file" multiple hidden><input id="folder-input" type="file" webkitdirectory multiple hidden>
+      <div class="path-bar"><nav id="breadcrumbs" aria-label="目录导航"></nav><button id="refresh-files" class="quiet">刷新</button></div>
+      <section id="upload-panel" class="upload-panel" hidden><div id="upload-label"></div><progress id="upload-progress" max="100" value="0"></progress><p id="upload-summary" class="muted"></p><ul id="upload-errors"></ul></section>
+      <div class="table-wrap"><table><thead><tr><th>名称</th><th>大小</th><th>修改时间</th><th class="operations">操作</th></tr></thead><tbody id="file-list"></tbody></table><p id="file-empty" class="empty" hidden>此文件夹暂无文件。点击上方按钮上传文件或新建文件夹。</p></div>
+      <p class="footnote">文件夹上传保留目录层级，不包含空文件夹。删除操作会永久移除服务器文件。</p>
+    </section>
+    <section id="users-view" hidden>
+      <div class="section-head"><div><div class="eyebrow">ADMINISTRATION</div><h1>用户管理</h1><p class="muted">为普通用户分配账号和独立的文件根目录。</p></div><button id="new-user" class="primary">新增用户</button></div>
+      <div class="path-bar"><span id="user-count"></span><button id="refresh-users" class="quiet">刷新</button></div>
+      <div class="table-wrap"><table><thead><tr><th>用户名</th><th>根目录</th><th>状态</th><th class="operations">操作</th></tr></thead><tbody id="user-list"></tbody></table><p id="user-empty" class="empty" hidden>还没有普通用户。新增用户后即可分配文件空间。</p></div>
+      <p class="footnote">修改用户配置将使其现有登录失效。删除账号会保留该用户的文件。</p>
+    </section>
+  </main>
+  <dialog id="user-dialog"><form id="user-form"><div class="dialog-head"><h2 id="user-title">新增用户</h2><button type="button" id="close-user" class="quiet">关闭</button></div><input name="id" type="hidden"><label>用户名<input name="username" maxlength="64" autocomplete="off" required></label><label>密码<input name="password" type="password" minlength="8" maxlength="256" autocomplete="new-password"><span id="password-help" class="muted">至少 8 个字符。</span></label><label>根目录<input name="root" placeholder="/srv/drive/alice" required><span class="muted">目录须已存在，服务账号须有读写权限。</span></label><label class="check"><input name="enabled" type="checkbox" checked>启用账号</label><p id="user-error" class="error" role="alert" hidden></p><button type="submit" class="primary full">保存用户</button></form></dialog>
+  <dialog id="conflict-dialog"><h2>同名文件已存在</h2><p id="conflict-name"></p><p class="muted">覆盖将替换服务器上现有的文件。</p><div class="conflict-actions"><button data-choice="skip">跳过</button><button data-choice="skip-all">全部跳过</button><button data-choice="overwrite" class="primary">覆盖</button><button data-choice="overwrite-all" class="primary">全部覆盖</button></div></dialog>
+  <footer>轻盘 · 简单管理你的服务器文件</footer>
+</body>
+</html>

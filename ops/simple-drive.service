@@ -1,0 +1,20 @@
+# Linux systemd 服务示例：项目路径 /opt/simple-drive，运行账号 simple-drive。
+[Unit]
+Description=Simple Drive file manager
+After=network.target
+
+[Service]
+Type=simple
+User=simple-drive
+Group=simple-drive
+WorkingDirectory=/opt/simple-drive
+EnvironmentFile=/etc/simple-drive.env
+ExecStart=/opt/simple-drive/.venv/bin/gunicorn --bind 127.0.0.1:8000 --workers 2 --threads 2 --timeout 3600 --access-logfile - --error-logfile - app:create_app()
+Restart=on-failure
+RestartSec=5
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

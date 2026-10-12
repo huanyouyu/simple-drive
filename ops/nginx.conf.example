@@ -1,0 +1,30 @@
+# 放入 Nginx sites-available 或 conf.d，替换域名和证书路径。
+server {
+    listen 80;
+    server_name drive.example.com;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name drive.example.com;
+    ssl_certificate /etc/letsencrypt/live/drive.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/drive.example.com/privkey.pem;
+
+    # 包含 1GB 文件及 multipart 表单开销；调整上传限制时同步修改。
+    client_max_body_size 1025m;
+    client_body_timeout 3600s;
+
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        # 直接由本机 Nginx 代理时，传入真实来源以区分登录失败计数。
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+        # 上传由 Nginx 接收落盘后再交给后端，防止慢速上传占用后端工作线程。
+        proxy_request_buffering on;
+        proxy_buffering off;
+    }
+}
