@@ -7,3 +7,5 @@ instance/
 *.sqlite3
 *.sqlite3-journal
 ops/drive.env
+deploy/
+target/

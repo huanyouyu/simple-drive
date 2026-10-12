@@ -19,79 +19,73 @@ Linux 上的文件管理网页，后端 Flask，账号存储 SQLite，前端为�
 
 依赖锁定在 `requirements.txt`。Gunicorn 23.0.0 支持 Python 3.9，24 及更新版本要求 Python 3.10，因此不能直接升级到这些版本。
 
-## 本机快速启动（Linux）
+## Linux 命令部署
 
-以下命令在项目目录运行，先安装依赖，再设置环境并创建管理员。初始化和运行必须使用相同的状态目录及密钥。
-
-```bash
-python3.9 -m venv .venv
-. .venv/bin/activate
-python -m pip install -r requirements.txt
-
-export DRIVE_SECRET_KEY="$(python -c 'import secrets; print(secrets.token_hex(32))')"
-export DRIVE_STATE_DIR="$PWD/instance"
-export DRIVE_COOKIE_SECURE=0
-
-# 命令交互输入用户名和密码，无默认管理员、无默认密码。
-python -m flask --app app:create_app init-admin
-gunicorn --bind 127.0.0.1:8000 --workers 2 --threads 2 --timeout 3600 'app:create_app()'
-```
-
-访问 `http://127.0.0.1:8000`。使用管理员登录后，新增普通用户。创建用户前，先在项目目录之外准备实际数据目录，例如 `/srv/drive/alice`，确保运行服务的 Linux 账号拥有读、写、执行权限。
-
-密钥须固定保存：每次重新生成会使已有登录失效。登录有效期 8 小时，修改用户资料、密码、根目录或启用状态均使该用户旧登录失效。已开始执行的文件请求可能完成，后续请求会拒绝旧登录。
-
-## Linux systemd 部署
-
-将项目复制到 `/opt/simple-drive`，以下为以 root 执行的部署示例。使用专用系统账号运行服务，实际账号密码通过管理员网页设置。
+先安装 Python 3.9 和 venv，使用有权读写用户数据目录的 Linux 账号执行以下命令：
 
 ```bash
-useradd --system --home-dir /var/lib/simple-drive --shell /usr/sbin/nologin simple-drive
-install -d -m 700 -o simple-drive -g simple-drive /var/lib/simple-drive
-install -d -m 750 -o simple-drive -g simple-drive /srv/drive/alice
-
-cd /opt/simple-drive
+git clone git@github.com:huanyouyu/simple-drive.git
+cd simple-drive
 python3.9 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
-cp ops/drive.env.example /etc/simple-drive.env
-chmod 600 /etc/simple-drive.env
+
+# 首次执行，交互设置超级管理员用户名和密码。
+bash run.sh init-admin
+
+# 启动；按 Ctrl+C 停止。
+bash run.sh start
 ```
 
-编辑 `/etc/simple-drive.env`，替换 `DRIVE_SECRET_KEY` 为随机密钥；确认项目及虚拟环境可被 `simple-drive` 系统账号读取。HTTPS 部署保留 `DRIVE_COOKIE_SECURE=1`。
+访问 `http://服务器IP:8000`，服务器防火墙需要允许访问此端口。使用管理员登录后新增普通用户；创建用户前，先在项目目录之外准备真实数据目录，并确保运行账号具有读写和访问权限。例如用当前 Linux 账号执行 `mkdir -p "$HOME/drive-data/alice"`，再在网页中填写该目录的绝对路径。
 
-初始化超级管理员，命令会交互询问账号和密码：
+`run.sh` 首次执行自动生成 `ops/drive.env`，保存随机密钥；以后启动自动读取同一份配置，无需手动导出环境变量。初始化管理员仅执行一次。保持配置和密钥不变，重新启动后原账号及文件继续可用。
+
+## 后台启动、停止和日志
+
+后台运行时退出 SSH 会话后程序继续运行：
 
 ```bash
-set -a
-. /etc/simple-drive.env
-set +a
-sudo --preserve-env=DRIVE_SECRET_KEY,DRIVE_STATE_DIR,DRIVE_COOKIE_SECURE,DRIVE_MAX_FILE_MB \
-  -u simple-drive /opt/simple-drive/.venv/bin/python -m flask --app /opt/simple-drive/app:create_app init-admin
+# 后台启动。
+bash run.sh background
 
-cp ops/simple-drive.service /etc/systemd/system/simple-drive.service
-systemctl daemon-reload
-systemctl enable --now simple-drive
-systemctl status simple-drive
-journalctl -u simple-drive -f
+# 查看最近 100 行日志并持续跟踪；Ctrl+C 只退出日志查看。
+bash run.sh logs
+
+# 停止前台或后台启动的本项目进程。
+bash run.sh stop
 ```
 
-配置 Nginx：参考 `ops/nginx.conf.example`，替换域名和已有证书路径，执行 `nginx -t` 后重载 Nginx。Gunicorn 仅绑定本机地址。HTTP 验证环境须把 `DRIVE_COOKIE_SECURE` 设置为 `0`，否则浏览器不会发送登录 Cookie。
+日志保存在 `instance/gunicorn.log`，PID 保存在 `instance/gunicorn.pid`。前台启动时日志直接显示在终端。停止命令会核对进程属于本项目后发送停止信号；等待进程退出、PID 文件消失，再重新启动。后台运行不会自动处理机器重启或进程崩溃，届时重新执行启动命令即可。
+
+## 可选：Nginx 与 HTTPS
+
+可直接通过服务器 IP 使用，也可以参考 `ops/nginx.conf.example` 配置域名和已有 HTTPS 证书。使用配套 Nginx 时，在 `ops/drive.env` 中设置：
+
+```bash
+DRIVE_BIND=127.0.0.1:8000
+DRIVE_COOKIE_SECURE=1
+DRIVE_TRUST_PROXY=1
+```
+
+随后重新启动网盘。仅通过 HTTP 访问时保持 `DRIVE_COOKIE_SECURE=0`，否则浏览器不会发送登录 Cookie。
 
 ## 配置与日常维护
 
 - `DRIVE_SECRET_KEY`：必填，至少 32 字符的随机密钥。
 - `DRIVE_STATE_DIR`：SQLite 和写操作锁文件目录，默认项目下 `instance`。
+- `DRIVE_BIND`：启动地址，默认 `0.0.0.0:8000`；使用本机 Nginx 代理时改为 `127.0.0.1:8000`。
 - `DRIVE_MAX_FILE_MB`：单文件上限，默认 `1024`；修改时同步调整 Nginx `client_max_body_size`，为 multipart 留出至少 1MB 余量。
 - `DRIVE_COOKIE_SECURE`：HTTPS 设置 `1`，本机 HTTP 设置 `0`。
 - `DRIVE_TRUST_PROXY`：默认 `0`；使用配套 Nginx、且 Gunicorn 仅监听本机时设 `1`，信任一层代理提供的来源地址和协议。
 
-配置修改后执行 `systemctl restart simple-drive`。用户管理网页保存的账号修改立即生效，不需要重启。管理员可以通过“编辑 / 重置密码”修改普通用户密码；密码留空表示保留原密码。
+配置保存在 `ops/drive.env`；修改后执行 `bash run.sh stop`，等待原进程退出，再执行 `bash run.sh start` 或 `bash run.sh background`。用户管理网页保存的账号修改立即生效。管理员可以通过“编辑 / 重置密码”修改普通用户密码；密码留空表示保留原密码。
 
-忘记超级管理员密码时，加载同一环境配置后执行：
+登录有效期 8 小时，修改用户资料、密码、根目录或启用状态均使该用户旧登录失效。已开始执行的文件请求可能完成，后续请求会拒绝旧登录。
+
+忘记超级管理员密码时，在项目目录执行：
 
 ```bash
-sudo --preserve-env=DRIVE_SECRET_KEY,DRIVE_STATE_DIR \
-  -u simple-drive /opt/simple-drive/.venv/bin/python -m flask --app /opt/simple-drive/app:create_app reset-admin-password
+bash run.sh reset-admin-password
 ```
 
 备份时停止服务，分别复制状态目录和所有用户根目录；恢复时保留原来的密钥，并恢复文件归属和目录权限。SQLite 只包含账号配置及登录失败计数，不包含用户文件。
@@ -113,7 +107,7 @@ sudo --preserve-env=DRIVE_SECRET_KEY,DRIVE_STATE_DIR \
 
 上传期间通过全局文件写锁串行执行写操作，适合少量用户。文件上传失败时已有文件保留，临时文件清理；进程被强制终止可能遗留隐藏的 `.drive-upload-*` 临时文件，可停服后清理。递归删除不具备事务能力，中途遇到权限或磁盘错误可能已删除部分内容。
 
-登录失败达到 10 次时对同一来源限制 5 分钟。自带 Nginx 配置只接受本机代理，Gunicorn 使用受信任的本机转发来源；自定义代理部署需保持该信任边界。
+登录失败达到 10 次时对同一来源限制 5 分钟。直接访问时不信任转发头；自带 Nginx 配置配合 Gunicorn 仅监听本机及 `DRIVE_TRUST_PROXY=1` 使用，信任一层代理。
 
 ## 验证
 
