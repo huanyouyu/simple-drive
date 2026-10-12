@@ -2,8 +2,10 @@
 
 import io
 import os
+import stat
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 from app import create_app
 
@@ -19,7 +21,8 @@ def main():
         root_b = base / "bob"
         root_a.mkdir()
         root_b.mkdir()
-        app = create_app({"TESTING": True, "SECRET_KEY": "check-secret-" * 4, "STATE_DIR": str(base / "state"), "MAX_FILE_BYTES": 32, "SESSION_COOKIE_SECURE": False})
+        with patch.dict(os.environ, {"DRIVE_UPLOAD_BLOCK_PATTERNS": "Secrets.*, private-config.json"}):
+            app = create_app({"TESTING": True, "SECRET_KEY": "check-secret-" * 4, "STATE_DIR": str(base / "state"), "MAX_FILE_BYTES": 32, "SESSION_COOKIE_SECURE": False})
         runner = app.test_cli_runner()
         result = runner.invoke(args=["init-admin", "--username", "admin", "--password", "AdminPass123"])
         assert result.exit_code == 0, result.output
@@ -38,9 +41,15 @@ def main():
             """发送带 CSRF 令牌的 JSON 写请求。"""
             return client.open(url, method=method, json=payload, headers={"X-CSRF-Token": token})
 
-        def push(client, token, path, content, overwrite=False):
+        def push(client, token, path, content, overwrite=False, filename="upload.bin"):
             """使用 multipart 请求上传字节内容。"""
-            return client.post("/api/upload", data={"path": path, "overwrite": "1" if overwrite else "0", "file": (io.BytesIO(content), "upload.bin")}, headers={"X-CSRF-Token": token})
+            # Step1：模拟启动脚本的严格 umask，验证显式设置权限有效。
+            previous_umask = os.umask(0o077)
+            try:
+                return client.post("/api/upload", data={"path": path, "overwrite": "1" if overwrite else "0", "file": (io.BytesIO(content), filename)}, headers={"X-CSRF-Token": token})
+            finally:
+                # Step2：恢复检查进程原有 umask。
+                os.umask(previous_umask)
 
         # Step2：验证未登录、CSRF、防止管理员越权及目录重叠。
         anonymous = app.test_client()
@@ -65,11 +74,13 @@ def main():
         assert alice.get("/api/users").status_code == 403
         assert push(alice, alice_token, "资料/子目录/中文.txt", b"original").status_code == 201
         assert (root_a / "资料/子目录/中文.txt").read_bytes() == b"original"
+        assert stat.S_IMODE((root_a / "资料/子目录/中文.txt").stat().st_mode) == 0o644
         assert not (root_b / "资料").exists()
         assert push(alice, alice_token, "资料/子目录/中文.txt", b"new").json["conflict"] is True
         assert (root_a / "资料/子目录/中文.txt").read_bytes() == b"original"
         assert push(alice, alice_token, "资料/子目录/中文.txt", b"new", True).status_code == 201
         assert (root_a / "资料/子目录/中文.txt").read_bytes() == b"new"
+        assert stat.S_IMODE((root_a / "资料/子目录/中文.txt").stat().st_mode) == 0o644
         assert push(alice, alice_token, "资料/子目录/中文.txt", b"x" * 33, True).status_code == 413
         assert (root_a / "资料/子目录/中文.txt").read_bytes() == b"new"
         assert not list(root_a.rglob(".drive-upload-*"))
@@ -81,6 +92,32 @@ def main():
         assert response.status_code == 200 and response.data == b"new"
         response.close()
         assert bob.get("/api/download", query_string={"path": "资料/子目录/中文.txt"}).status_code == 404
+
+        # 上传过滤必须覆盖大小写、嵌套目录、自定义规则和原始文件名。
+        blocked_paths = (
+            ".env", ".ENV.production", "production.env", ".git/config", "项目/.svn/entries", "项目/.hg/config",
+            "项目/.ssh/id_rsa", "项目/.aws/credentials", "项目/.kube/config", "id_rsa", "id_ed25519_sk",
+            "server.PEM", "private.key", "cert.p12", "cert.pfx", "keystore.jks", "private.ppk",
+            "SECRETS.yaml", "new-folder/private-config.json",
+        )
+        for path in blocked_paths:
+            response = push(alice, alice_token, path, b"blocked")
+            assert response.status_code == 422 and response.json["blocked"] is True, (path, response.json)
+            assert not (root_a / path).exists()
+        assert not (root_a / "项目").exists() and not (root_a / "new-folder").exists()
+        # multipart 头中的 Windows 反斜杠必须转义，才能还原真实原文件名。
+        for filename in (".env", "local/id_rsa", "C:\\\\fakepath\\\\id_rsa"):
+            response = push(alice, alice_token, "innocent.txt", b"blocked", filename=filename)
+            assert response.status_code == 422 and not (root_a / "innocent.txt").exists(), response.json
+        protected = root_a / ".env"
+        protected.write_bytes(b"existing-secret")
+        protected.chmod(0o600)
+        assert push(alice, alice_token, ".env", b"overwrite", True).status_code == 422
+        assert protected.read_bytes() == b"existing-secret" and stat.S_IMODE(protected.stat().st_mode) == 0o600
+        for path in (".gitignore", "id_rsa.pub", "photo.png", "notes.txt", "normal/hello.py"):
+            assert push(alice, alice_token, path, b"ordinary").status_code == 201, path
+            assert stat.S_IMODE((root_a / path).stat().st_mode) == 0o644
+        assert not list(root_a.rglob(".drive-upload-*"))
 
         # Step4：验证新建、重命名、符号链接和根目录删除保护。
         assert send(alice, alice_token, "POST", "/api/folders", {"path": "", "name": "新目录"}).status_code == 201
@@ -135,7 +172,7 @@ def main():
         assert admin.get("/api/users").status_code == 401
         admin, admin_token = client_login("admin", "AdminNewPass123")
         assert admin.get("/api/users").status_code == 200
-        print("PASS: 账号权限、目录隔离、上传覆盖、超限保留、路径穿越、符号链接、删除保护、会话失效")
+        print("PASS: 账号权限、目录隔离、上传覆盖、0644 权限、敏感文件过滤、超限保留、路径穿越、符号链接、删除保护、会话失效")
 
 
 if __name__ == "__main__":

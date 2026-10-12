@@ -175,7 +175,8 @@ function uploadOne(file, path, overwrite) {
     xhr.onload = () => {
       let data;
       try { data = JSON.parse(xhr.responseText); } catch { reject(new Error("服务器返回异常，请检查上传限制和服务日志")); return; }
-      if (xhr.status === 409 && data.conflict) resolve({ conflict: true });
+      if (xhr.status === 422 && data.blocked) resolve({ blocked: true, reason: data.error });
+      else if (xhr.status === 409 && data.conflict) resolve({ conflict: true });
       else if (xhr.status >= 200 && xhr.status < 300) resolve({ ok: true });
       else { const error = new Error(data.error || "上传失败"); error.status = xhr.status; reject(error); }
     };
@@ -222,6 +223,10 @@ async function uploadBatch(files, folderMode) {
           const choice = await conflictChoice(path);
           if (choice === "skip") { skipped++; continue; }
           result = await uploadOne(file, path, true);
+        }
+        if (result.blocked) {
+          skipped++; const item = document.createElement("li"); item.textContent = `${path}：已跳过，${result.reason}`; el("upload-errors").append(item);
+          continue;
         }
         if (result.ok) success++;
       } catch (error) {

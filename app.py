@@ -1,6 +1,7 @@
 """Python 3.9/Linux 简易网盘：账号管理、登录及隔离的文件操作。"""
 
 import functools
+import fnmatch
 import hmac
 import os
 import secrets
@@ -15,6 +16,14 @@ from flask import Flask, g, jsonify, request, send_file, session
 from werkzeug.exceptions import HTTPException
 from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.middleware.proxy_fix import ProxyFix
+
+
+# 默认按路径组件匹配；点文件配置、版本库元数据和密钥均不允许上传。
+DEFAULT_UPLOAD_BLOCK_PATTERNS = (
+    ".env", ".env.*", "*.env", ".git", ".svn", ".hg", ".ssh", ".aws", ".kube",
+    "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519", "id_xmss", "id_ecdsa_sk", "id_ed25519_sk",
+    "*.key", "*.pem", "*.p12", "*.pfx", "*.jks", "*.ppk",
+)
 
 
 class DriveError(Exception):
@@ -35,6 +44,9 @@ def create_app(test_config=None):
         SECRET_KEY=os.environ.get("DRIVE_SECRET_KEY"),
         STATE_DIR=str(state_dir),
         MAX_FILE_BYTES=int(os.environ.get("DRIVE_MAX_FILE_MB", "1024")) * 1024 * 1024,
+        UPLOAD_BLOCK_PATTERNS=DEFAULT_UPLOAD_BLOCK_PATTERNS + tuple(
+            pattern.strip().casefold() for pattern in os.environ.get("DRIVE_UPLOAD_BLOCK_PATTERNS", "").split(",") if pattern.strip()
+        ),
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",
         SESSION_COOKIE_SECURE=os.environ.get("DRIVE_COOKIE_SECURE", "0") == "1",
@@ -551,6 +563,11 @@ def create_app(test_config=None):
         incoming = request.files.get("file")
         if incoming is None:
             raise DriveError("请选择上传文件")
+        # 在创建目录或临时文件前过滤目标路径及 multipart 原始文件名。
+        original_parts = (incoming.filename or "").replace("\\", "/").split("/")
+        blocked = blocked_upload_component(source + original_parts)
+        if blocked:
+            return jsonify(error="敏感文件或目录禁止上传：" + blocked, blocked=True), 422
         overwrite = request.form.get("overwrite") == "1"
         # Step2：创建父目录并检查目标类型。
         with storage_lock(), root_fd(g.user["root"]) as root, directory(root, source[:-1], create=True) as folder:
@@ -563,7 +580,7 @@ def create_app(test_config=None):
             if info and not overwrite:
                 return jsonify(error="同名文件已存在", conflict=True), 409
             temporary = ".drive-upload-" + secrets.token_hex(16)
-            descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o640, dir_fd=folder)
+            descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=folder)
             try:
                 # Step3：按块写入并执行大小检查，完成后替换目标。
                 total = 0
@@ -577,6 +594,8 @@ def create_app(test_config=None):
                             raise DriveError("文件超过上传大小限制", 413)
                         output.write(chunk)
                     output.flush()
+                    # 显式设置最终文件权限，保证不受启动进程 umask 077 影响。
+                    os.fchmod(output.fileno(), 0o644)
                     os.fsync(output.fileno())
                 if overwrite:
                     os.replace(temporary, source[-1], src_dir_fd=folder, dst_dir_fd=folder)
@@ -594,6 +613,16 @@ def create_app(test_config=None):
                     # 原子覆盖成功时，临时名称已经被替换操作移走。
                     pass
         return jsonify(ok=True, size=total), 201
+
+    def blocked_upload_component(components):
+        """按名称忽略大小写匹配敏感文件及目录，返回首个被拦截的组件。"""
+        # Step1：对每层目录和文件名称分别检查，覆盖文件夹内嵌的敏感目录。
+        for component in components:
+            normalized = component.casefold()
+            # Step2：同时应用默认规则与配置追加的通配符规则。
+            if any(fnmatch.fnmatchcase(normalized, pattern.casefold()) for pattern in app.config["UPLOAD_BLOCK_PATTERNS"]):
+                return component
+        return None
 
     @app.cli.command("init-admin")
     @click.option("--username", prompt="超级管理员用户名")

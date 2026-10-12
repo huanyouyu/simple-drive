@@ -21,7 +21,7 @@
       <div class="path-bar"><nav id="breadcrumbs" aria-label="目录导航"></nav><button id="refresh-files" class="quiet">刷新</button></div>
       <section id="upload-panel" class="upload-panel" hidden><div id="upload-label"></div><progress id="upload-progress" max="100" value="0"></progress><p id="upload-summary" class="muted"></p><ul id="upload-errors"></ul></section>
       <div class="table-wrap"><table><thead><tr><th>名称</th><th>大小</th><th>修改时间</th><th class="operations">操作</th></tr></thead><tbody id="file-list"></tbody></table><p id="file-empty" class="empty" hidden>此文件夹暂无文件。点击上方按钮上传文件或新建文件夹。</p></div>
-      <p class="footnote">文件夹上传保留目录层级，不包含空文件夹。删除操作会永久移除服务器文件。</p>
+      <p class="footnote">文件夹上传保留目录层级，不包含空文件夹；敏感配置、密钥及版本库目录会被跳过。删除操作会永久移除服务器文件。</p>
     </section>
     <section id="users-view" hidden>
       <div class="section-head"><div><div class="eyebrow">ADMINISTRATION</div><h1>用户管理</h1><p class="muted">为普通用户分配账号和独立的文件根目录。</p></div><button id="new-user" class="primary">新增用户</button></div>
