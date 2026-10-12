@@ -1,0 +1,9 @@
+.venv/
+.check-deps/
+.check-pip/
+__pycache__/
+*.pyc
+instance/
+*.sqlite3
+*.sqlite3-journal
+ops/drive.env
