@@ -36,7 +36,8 @@ td:first-child { min-width:220px; overflow-wrap:anywhere; }
 td:nth-child(2) { overflow-wrap:anywhere; }
 .operations { min-width:205px; }
 .file-name { border:0; background:transparent; padding:0; text-align:left; white-space:normal; overflow-wrap:anywhere; }
-.file-icon { display:inline-flex; width:30px; height:30px; align-items:center; justify-content:center; color:var(--accent); background:#e9f4ed; border-radius:6px; margin-right:12px; font-size:12px; }
+.file-icon { display:inline-flex; width:30px; height:30px; align-items:center; justify-content:center; color:var(--accent); background:#e9f4ed; border-radius:6px; margin-right:12px; vertical-align:middle; }
+.file-icon svg { display:block; width:18px; height:18px; }
 .empty { padding:50px 20px; text-align:center; color:var(--muted); }
 .footnote { margin-top:18px; }
 .badge { display:inline-block; padding:3px 10px; border-radius:20px; font-size:12px; background:#e5f2e9; color:var(--accent); }

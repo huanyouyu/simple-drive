@@ -63,6 +63,20 @@ function button(text, action, danger = false) {
 async function run(action) { try { await action(); } catch (error) { notice(error.message, true); } }
 /** 拼接当前目录和单个相对路径。 */
 function joinPath(parent, name) { return parent ? `${parent}/${name}` : name; }
+/** 创建文件夹或文档 SVG 图标，装饰图标不参与读屏名称。 */
+function fileIcon(isDirectory) {
+  // Step1：创建图标容器及使用当前主题色的 SVG。
+  const container = document.createElement("span"); container.className = "file-icon"; container.setAttribute("aria-hidden", "true");
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  for (const [name, value] of Object.entries({ viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": "1.7", "stroke-linecap": "round", "stroke-linejoin": "round", focusable: "false" })) svg.setAttribute(name, value);
+  // Step2：选用文件夹轮廓或带折角和文本线的文档轮廓。
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  path.setAttribute("d", isDirectory
+    ? "M3 7h18M3 7V5a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"
+    : "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8L14 2ZM14 2v6h6M8 13h8M8 17h5");
+  svg.append(path); container.append(svg);
+  return container;
+}
 /** 加载文件列表并生成面包屑导航。 */
 async function loadFiles() {
   // Step1：读取当前目录，生成可点击的路径导航。
@@ -82,8 +96,8 @@ async function loadFiles() {
   for (const entry of data.entries) {
     const row = document.createElement("tr"); const nameCell = cell();
     const name = document.createElement("button"); name.className = "file-name";
-    const icon = document.createElement("span"); icon.className = "file-icon"; icon.textContent = entry.is_dir ? "夹" : "文";
-    name.append(icon, document.createTextNode(entry.name));
+    name.setAttribute("aria-label", `${entry.is_dir ? "文件夹" : "文件"}：${entry.name}`);
+    name.append(fileIcon(entry.is_dir), document.createTextNode(entry.name));
     const target = joinPath(state.path, entry.name);
     name.addEventListener("click", () => run(() => entry.is_dir ? navigate(target) : downloadFile(target)));
     nameCell.append(name);

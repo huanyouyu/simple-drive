@@ -3,12 +3,12 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>轻盘 · 文件管理</title>
+  <title>YABEKA · 文件管理</title>
   <link rel="stylesheet" href="/static/style.css">
   <script src="/static/app.js" defer></script>
 </head>
 <body>
-  <header class="header"><a class="brand" href="/">轻盘<span>服务器文件管理</span></a><div id="account" hidden><span id="identity"></span><button id="logout" class="quiet">退出登录</button></div></header>
+  <header class="header"><a class="brand" href="/">YABEKA<span>服务器文件管理</span></a><div id="account" hidden><span id="identity"></span><button id="logout" class="quiet">退出登录</button></div></header>
   <main>
     <div id="notice" role="status" aria-live="polite" hidden></div>
     <section id="login-view" class="login-card" hidden>
@@ -32,6 +32,6 @@
   </main>
   <dialog id="user-dialog"><form id="user-form"><div class="dialog-head"><h2 id="user-title">新增用户</h2><button type="button" id="close-user" class="quiet">关闭</button></div><input name="id" type="hidden"><label>用户名<input name="username" maxlength="64" autocomplete="off" required></label><label>密码<input name="password" type="password" minlength="8" maxlength="256" autocomplete="new-password"><span id="password-help" class="muted">至少 8 个字符。</span></label><label>根目录<input name="root" placeholder="/srv/drive/alice" required><span class="muted">目录须已存在，服务账号须有读写权限。</span></label><label>下载根地址（可选）<input name="download_base_url" type="url" maxlength="2048" placeholder="https://files.example.com/alice/"><span class="muted">该地址须映射到此用户的根目录；留空使用网盘下载接口。</span></label><label class="check"><input name="enabled" type="checkbox" checked>启用账号</label><p id="user-error" class="error" role="alert" hidden></p><button type="submit" class="primary full">保存用户</button></form></dialog>
   <dialog id="conflict-dialog"><h2>同名文件已存在</h2><p id="conflict-name"></p><p class="muted">覆盖将替换服务器上现有的文件。</p><div class="conflict-actions"><button data-choice="skip">跳过</button><button data-choice="skip-all">全部跳过</button><button data-choice="overwrite" class="primary">覆盖</button><button data-choice="overwrite-all" class="primary">全部覆盖</button></div></dialog>
-  <footer>轻盘 · 简单管理你的服务器文件</footer>
+  <footer>YABEKA · 简单管理你的服务器文件</footer>
 </body>
 </html>

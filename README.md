@@ -1,4 +1,4 @@
-# 轻盘：Python 3.9 简易服务器网盘
+# YABEKA：Python 3.9 简易服务器网盘
 
 Linux 上的文件管理网页，后端 Flask，账号存储 SQLite，前端为普通 HTML/CSS/JavaScript。文件直接保存在各用户配置的目录中，不进入数据库。
 
