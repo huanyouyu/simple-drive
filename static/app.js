@@ -101,12 +101,17 @@ async function navigate(path) {
   const previous = state.path; state.path = path;
   try { await loadFiles(); } catch (error) { state.path = previous; throw error; }
 }
-/** 下载前确认会话仍有效，然后通过浏览器直接下载文件。 */
+/** 校验会话后按用户下载根地址生成链接，留空时使用本网盘下载接口。 */
 async function downloadFile(path) {
+  // Step1：读取当前账号的最新下载配置，拒绝已经失效的会话。
   await refreshSession(false);
   if (!state.user) throw new Error("登录已失效，请重新登录");
   const anchor = document.createElement("a");
-  anchor.href = `/api/download?path=${encodeURIComponent(path)}`; anchor.download = "";
+  // Step2：逐级编码相对路径，防止中文、空格、问号等改变 URL 含义。
+  anchor.href = state.user.download_base_url
+    ? state.user.download_base_url + path.split("/").map(encodeURIComponent).join("/")
+    : `/api/download?path=${encodeURIComponent(path)}`;
+  anchor.download = "";
   document.body.append(anchor); anchor.click(); anchor.remove();
 }
 /** 提示新名称并提交重命名操作。 */
@@ -145,6 +150,7 @@ function openUser(user = null) {
   form.elements.id.value = user ? user.id : "";
   form.elements.username.value = user ? user.username : "";
   form.elements.root.value = user ? user.root : "";
+  form.elements.download_base_url.value = user ? user.download_base_url : "";
   form.elements.enabled.checked = user ? !!user.enabled : true;
   form.elements.password.required = !user;
   el("user-title").textContent = user ? "编辑用户" : "新增用户";
@@ -286,7 +292,7 @@ el("user-form").addEventListener("submit", async (event) => {
   event.preventDefault(); const form = event.currentTarget; const id = form.elements.id.value; const submit = form.querySelector("button[type=submit]");
   submit.disabled = true; el("user-error").hidden = true;
   try {
-    await api(id ? `/api/users/${id}` : "/api/users", { method: id ? "PUT" : "POST", body: JSON.stringify({ username: form.elements.username.value, password: form.elements.password.value, root: form.elements.root.value, enabled: form.elements.enabled.checked }) });
+    await api(id ? `/api/users/${id}` : "/api/users", { method: id ? "PUT" : "POST", body: JSON.stringify({ username: form.elements.username.value, password: form.elements.password.value, root: form.elements.root.value, download_base_url: form.elements.download_base_url.value, enabled: form.elements.enabled.checked }) });
     el("user-dialog").close(); await loadUsers(); notice(id ? "用户已更新，原登录已失效" : "用户创建成功");
   } catch (error) { el("user-error").textContent = error.message; el("user-error").hidden = false; }
   finally { submit.disabled = false; }

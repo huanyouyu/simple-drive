@@ -5,6 +5,7 @@ Linux 上的文件管理网页，后端 Flask，账号存储 SQLite，前端为�
 ## 功能
 
 - 唯一超级管理员：新增、编辑、启用、停用、删除普通用户，设置根目录、重置密码。
+- 超级管理员可为每个普通用户配置可选的 HTTP/HTTPS 下载根地址。
 - 普通用户：浏览目录、新建文件夹、重命名、下载文件、永久删除文件和非空文件夹。
 - 两个独立上传按钮：上传文件（支持多选）、上传文件夹（保留所选文件夹名称及内部层级）。
 - 同名文件确认覆盖、全部覆盖、跳过、全部跳过；同名文件夹合并，类型冲突报错。
@@ -84,6 +85,10 @@ DRIVE_TRUST_PROXY=1
 
 登录有效期 8 小时，修改用户资料、密码、根目录或启用状态均使该用户旧登录失效。已开始执行的文件请求可能完成，后续请求会拒绝旧登录。
 
+超级管理员在新增或编辑用户时可以填写“下载根地址”。例如用户根目录 `/srv/drive/alice` 对应地址 `https://files.example.com/alice/`，文件 `资料/a.txt` 的下载地址为 `https://files.example.com/alice/%E8%B5%84%E6%96%99/a.txt`。中文、空格、`#`、`?` 等会按路径层级编码，末尾斜杠自动补齐。留空时使用原有 `/api/download` 登录下载接口。
+
+下载根地址是已有文件下载服务的 URL 前缀，需由配置的 Nginx、CDN 或其他文件服务映射到该用户根目录；网盘不会自动建立静态映射或向下载服务同步文件。外部地址的鉴权及附件下载响应由该文件服务负责。修改此配置会使用户旧登录失效，更新程序后现有数据库自动添加字段，旧用户默认留空。
+
 忘记超级管理员密码时，在项目目录执行：
 
 ```bash
@@ -98,7 +103,7 @@ bash run.sh reset-admin-password
 
 - `GET /api/session`：当前账号、CSRF 令牌和上传限制。
 - `POST /api/login`：`username`、`password`；`POST /api/logout`：退出。
-- `GET /api/users`：普通用户列表；`POST /api/users`：新增，字段 `username`、`password`、`root`、`enabled`。
+- `GET /api/users`：普通用户列表；`POST /api/users`：新增，字段 `username`、`password`、`root`、`enabled`，以及可选 `download_base_url`。
 - `PUT /api/users/<id>`：更新同上字段，空密码保留原密码；`DELETE /api/users/<id>`：仅删除账号。
 - `GET /api/files?path=相对目录`：列表；`POST /api/folders`：`path`、`name`。
 - `POST /api/rename`：`path`、`name`；`DELETE /api/files`：`path`、`confirmed: true`。

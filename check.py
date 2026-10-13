@@ -3,6 +3,7 @@
 import io
 import os
 import stat
+import sqlite3
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
@@ -62,6 +63,7 @@ def main():
             assert response.status_code == 201, response.json
         users = admin.get("/api/users").json["users"]
         assert len(users) == 2 and all("password_hash" not in user for user in users)
+        assert all(user["download_base_url"] == "" for user in users)
         child = root_a / "child"
         child.mkdir()
         response = send(admin, admin_token, "POST", "/api/users", {"username": "overlap", "password": "UserPass123", "root": str(child), "enabled": True})
@@ -141,6 +143,23 @@ def main():
 
         # Step5：验证密码修改、停用与删除账号后旧登录失效且数据保留。
         alice_id = next(user["id"] for user in users if user["username"] == "alice")
+        download_data = {"username": "alice", "root": str(root_a), "enabled": True, "password": "", "download_base_url": "https://files.example.com/alice"}
+        assert send(admin, admin_token, "PUT", "/api/users/%s" % alice_id, download_data).status_code == 200
+        assert alice.get("/api/files").status_code == 401
+        alice, alice_token = client_login("alice", "UserPass123")
+        assert alice.get("/api/session").json["user"]["download_base_url"] == "https://files.example.com/alice/"
+        for invalid in ("javascript:alert(1)", "/files", "https://", "https://user:password@files.example.com", "https://files.example.com/?token=x", "https://files.example.com/#part", "https://files.example.com:invalid/", "https://files.example.com/space here", "https://files.example.com\\path", 123, None):
+            download_data["download_base_url"] = invalid
+            response = send(admin, admin_token, "PUT", "/api/users/%s" % alice_id, download_data)
+            assert response.status_code == 400, (invalid, response.json)
+        download_data.pop("download_base_url")
+        assert send(admin, admin_token, "PUT", "/api/users/%s" % alice_id, download_data).status_code == 200
+        alice, alice_token = client_login("alice", "UserPass123")
+        assert alice.get("/api/session").json["user"]["download_base_url"] == "https://files.example.com/alice/"
+        download_data["download_base_url"] = ""
+        assert send(admin, admin_token, "PUT", "/api/users/%s" % alice_id, download_data).status_code == 200
+        alice, alice_token = client_login("alice", "UserPass123")
+        assert alice.get("/api/session").json["user"]["download_base_url"] == ""
         user_data = {"username": "alice", "root": str(root_a), "enabled": True, "password": "NewPassword123"}
         assert send(admin, admin_token, "PUT", "/api/users/%s" % alice_id, user_data).status_code == 200
         assert alice.get("/api/files").status_code == 401
@@ -172,7 +191,25 @@ def main():
         assert admin.get("/api/users").status_code == 401
         admin, admin_token = client_login("admin", "AdminNewPass123")
         assert admin.get("/api/users").status_code == 200
-        print("PASS: 账号权限、目录隔离、上传覆盖、0644 权限、敏感文件过滤、超限保留、路径穿越、符号链接、删除保护、会话失效")
+        # Step7：模拟无下载字段的旧数据库，确认升级幂等且保留账号凭据。
+        legacy_state = base / "legacy-state"
+        legacy_state.mkdir()
+        with sqlite3.connect(str(base / "state/drive.sqlite3")) as connection:
+            hashed = connection.execute("-- 复用临时检查账号的密码哈希\nSELECT password_hash FROM users WHERE username = 'bob'").fetchone()[0]
+        with sqlite3.connect(str(legacy_state / "drive.sqlite3")) as connection:
+            connection.execute("-- 创建旧版本用户表以检查兼容迁移\nCREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT UNIQUE, password_hash TEXT, role TEXT, root TEXT, enabled INTEGER, version INTEGER, created_at TEXT)")
+            connection.execute("-- 写入旧版本普通用户记录\nINSERT INTO users VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (9, "legacy", hashed, "user", str(root_b), 1, 7, "2026-10-12 00:00:00"))
+        legacy_config = {"TESTING": True, "SECRET_KEY": "legacy-secret-" * 4, "STATE_DIR": str(legacy_state), "SESSION_COOKIE_SECURE": False}
+        legacy_app = create_app(legacy_config)
+        create_app(legacy_config)
+        with sqlite3.connect(str(legacy_state / "drive.sqlite3")) as connection:
+            row = connection.execute("-- 检查升级后账号字段及原凭据\nSELECT id, password_hash, version, download_base_url FROM users WHERE username = 'legacy'").fetchone()
+            assert row == (9, hashed, 7, "")
+        legacy_client = legacy_app.test_client()
+        token = legacy_client.get("/api/session").json["csrf"]
+        response = legacy_client.post("/api/login", json={"username": "legacy", "password": "UserPass123"}, headers={"X-CSRF-Token": token})
+        assert response.status_code == 200 and response.json["user"]["download_base_url"] == ""
+        print("PASS: 原有账号与文件流程、下载地址校验及更新、旧接口兼容、旧数据库迁移")
 
 
 if __name__ == "__main__":

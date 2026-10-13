@@ -10,6 +10,7 @@ import stat
 from contextlib import contextmanager
 from datetime import timedelta
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 import click
 from flask import Flask, g, jsonify, request, send_file, session
@@ -97,6 +98,7 @@ def create_app(test_config=None):
                 password_hash TEXT NOT NULL,
                 role TEXT NOT NULL CHECK (role IN ('admin', 'user')),
                 root TEXT,
+                download_base_url TEXT NOT NULL DEFAULT '',
                 enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
                 version INTEGER NOT NULL DEFAULT 1,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -109,6 +111,11 @@ def create_app(test_config=None):
                 updated_at INTEGER NOT NULL
             );
         """)
+    # Step3：在写事务内兼容旧数据库，多个工作进程启动时串行检查迁移。
+    with db(write=True) as connection:
+        columns = connection.execute("-- 查询用户表字段以兼容已有数据库\nPRAGMA table_info(users)").fetchall()
+        if "download_base_url" not in {column["name"] for column in columns}:
+            connection.execute("-- 为已有账号增加可选下载根地址，空值使用原下载接口\nALTER TABLE users ADD COLUMN download_base_url TEXT NOT NULL DEFAULT ''")
     os.chmod(database, 0o600)
 
     def body():
@@ -140,7 +147,27 @@ def create_app(test_config=None):
 
     def public_user(row):
         """返回可公开的账号信息，排除密码哈希和会话版本。"""
-        return {key: row[key] for key in ("id", "username", "role", "root", "enabled", "created_at")}
+        return {key: row[key] for key in ("id", "username", "role", "root", "download_base_url", "enabled", "created_at")}
+
+    def download_base_url(value):
+        """校验 HTTP/HTTPS 下载地址前缀，统一补齐末尾斜杠。"""
+        # Step1：空字符串表示继续使用本网盘的登录下载接口。
+        if not isinstance(value, str):
+            raise DriveError("下载根地址必须为字符串")
+        value = value.strip()
+        if not value:
+            return ""
+        if len(value) > 2048 or any(char.isspace() or ord(char) < 32 for char in value):
+            raise DriveError("下载根地址不能包含空白或控制字符")
+        # Step2：只接受完整 HTTP/HTTPS 地址，不接受凭据、查询参数或片段。
+        try:
+            parsed = urlsplit(value)
+            valid = parsed.scheme.lower() in ("http", "https") and parsed.hostname and parsed.port != 0
+        except ValueError:
+            raise DriveError("下载根地址格式无效")
+        if not valid or parsed.username is not None or parsed.password is not None or parsed.query or parsed.fragment or "\\" in value:
+            raise DriveError("下载根地址须为 HTTP/HTTPS 地址，且不能包含登录凭据、查询参数或片段")
+        return urlunsplit((parsed.scheme.lower(), parsed.netloc, parsed.path.rstrip("/") + "/", "", ""))
 
     def require_role(role=None):
         """生成登录及角色检查装饰器。"""
@@ -319,6 +346,7 @@ def create_app(test_config=None):
         data = body()
         username = account_name(text_field(data, "username"))
         hashed = password_hash(text_field(data, "password"))
+        download_root = download_base_url(data.get("download_base_url", ""))
         enabled = data.get("enabled", True)
         if not isinstance(enabled, bool):
             raise DriveError("启用状态必须为布尔值")
@@ -326,8 +354,8 @@ def create_app(test_config=None):
         with db(write=True) as connection:
             root = validated_root(text_field(data, "root"), connection)
             connection.execute(
-                "-- 新增普通用户配置\nINSERT INTO users (username, password_hash, role, root, enabled) VALUES (?, ?, 'user', ?, ?)",
-                (username, hashed, root, int(enabled)),
+                "-- 新增普通用户配置及可选下载根地址\nINSERT INTO users (username, password_hash, role, root, download_base_url, enabled) VALUES (?, ?, 'user', ?, ?, ?)",
+                (username, hashed, root, download_root, int(enabled)),
             )
         return jsonify(ok=True), 201
 
@@ -353,9 +381,11 @@ def create_app(test_config=None):
             requested_root = text_field(data, "root")
             # 未修改目录时保留原配置，即使目录暂时不可访问也允许停用账号。
             root = row["root"] if requested_root == row["root"] else validated_root(requested_root, connection, user_id)
+            # 兼容旧客户端；未提交下载地址时保留已有配置，显式留空才清除。
+            download_root = download_base_url(data.get("download_base_url", row["download_base_url"]))
             connection.execute(
-                "-- 更新普通用户资料并使旧会话失效\nUPDATE users SET username = ?, password_hash = ?, root = ?, enabled = ?, version = version + 1 WHERE id = ? AND role = 'user'",
-                (username, hashed or row["password_hash"], root, int(enabled), user_id),
+                "-- 更新普通用户资料和下载根地址并使旧会话失效\nUPDATE users SET username = ?, password_hash = ?, root = ?, download_base_url = ?, enabled = ?, version = version + 1 WHERE id = ? AND role = 'user'",
+                (username, hashed or row["password_hash"], root, download_root, int(enabled), user_id),
             )
         return jsonify(ok=True)
 
